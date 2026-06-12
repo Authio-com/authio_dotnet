@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Authio.Sdk/Authio.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Authio.Sdk.Tests/Authio.Sdk.Tests.csproj" />
+  </Folder>
+</Solution>

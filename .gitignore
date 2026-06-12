@@ -1,0 +1,8 @@
+.DS_Store
+bin/
+obj/
+*.user
+.vs/
+.idea/
+[Tt]est[Rr]esults/
+*.log

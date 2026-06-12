@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Authio</RootNamespace>
+    <AssemblyName>Authio.Sdk</AssemblyName>
+
+    <PackageId>Authio.Sdk</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Authio</Authors>
+    <Company>Authio</Company>
+    <Description>Official .NET server SDK for Authio.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Authio-com/authio_dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Authio-com/authio_dotnet</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Vetted Ed25519 (EdDSA) primitive. Pure-managed, cross-platform,
+         no native libsodium binary. JWT/JWKS parsing uses System.Text.Json. -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.1" />
+  </ItemGroup>
+
+</Project>
