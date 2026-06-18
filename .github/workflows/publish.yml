@@ -8,15 +8,12 @@ on:
 permissions:
   contents: read
 
-# GitHub Actions doesn't allow `secrets.X != ''` inside an `if:` expression,
-# so we hoist NUGET_API_KEY to the job-level env and gate the push step with
-# `env.NUGET_API_KEY != ''`. The build + test + pack steps run unconditionally
-# on every tag push; the push step skips cleanly when the secret is missing.
 jobs:
   publish:
     runs-on: ubuntu-latest
-    env:
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+    permissions:
+      id-token: write # Required for NuGet trusted publishing (OIDC)
+      contents: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -26,9 +23,10 @@ jobs:
       - run: dotnet build --no-restore --configuration Release
       - run: dotnet test --no-build --configuration Release
       - run: dotnet pack src/Authio.Sdk/Authio.Sdk.csproj --no-build --configuration Release -o ./artifacts
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: Authio
       - name: Push to NuGet
-        if: env.NUGET_API_KEY != ''
-        run: dotnet nuget push "./artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
-      - name: Skip push (no NUGET_API_KEY secret)
-        if: env.NUGET_API_KEY == ''
-        run: echo "::notice::NUGET_API_KEY secret is not set; skipping push."
+        run: dotnet nuget push "./artifacts/*.nupkg" --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
