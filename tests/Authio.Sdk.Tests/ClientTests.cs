@@ -147,7 +147,7 @@ public class ClientTests
     public async Task PortalGenerateLink()
     {
         var h = TestHandler.Sequence(new Canned(201,
-            "{\"link\":\"https://admin-portal.authio.com/setup/abc\",\"expires_at\":\"2026-06-11T00:05:00Z\"}"));
+            "{\"link\":\"https://portal.authio.com/setup/abc\",\"expires_at\":\"2026-06-11T00:05:00Z\"}"));
         var a = Client(h);
         var link = await a.Portal.GenerateLinkAsync(new GenerateLinkInput
         {
