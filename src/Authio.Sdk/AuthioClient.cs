@@ -49,7 +49,8 @@ public sealed class AuthioClient
             options.ResolvedAuthCoreUrl + JwksPath,
             options.JwtIssuer,
             options.JwtAudience,
-            options.HttpClient);
+            options.HttpClient,
+            options.ProjectId);
 
         Users = new UsersApi(_transport);
         Organizations = new OrganizationsApi(_transport);

@@ -45,16 +45,28 @@ public class JwtVerifierTests
     private static string Jwks(Ed25519PublicKeyParameters pub, string kid) =>
         $"{{\"keys\":[{{\"kty\":\"OKP\",\"crv\":\"Ed25519\",\"use\":\"sig\",\"alg\":\"EdDSA\",\"kid\":\"{kid}\",\"x\":\"{B64(pub.GetEncoded())}\"}}]}}";
 
-    private static AuthioClient Client(TestHandler h, string? iss = null, string? aud = null) =>
+    // iss/aud fall back to the real defaults rather than null. Passing null
+    // explicitly would switch the checks off, which is what let the older
+    // tests mint tokens with no iss/aud at all and still pass.
+    private static AuthioClient Client(
+        TestHandler h, string? iss = null, string? aud = null, string? projectId = null) =>
         new(new AuthioOptions
         {
             ApiKey = "sk_test",
             ApiUrl = "https://api.test",
             AuthCoreUrl = "https://api.test",
-            JwtIssuer = iss,
-            JwtAudience = aud,
+            JwtIssuer = iss ?? AuthioOptions.DefaultIssuer,
+            JwtAudience = aud ?? AuthioOptions.DefaultAudience,
+            ProjectId = projectId,
             HttpClient = new HttpClient(h),
         });
+
+    /// <summary>Claims carrying the issuer/audience auth-core really stamps.</summary>
+    private static string DefaultClaims(long exp, string? projectId = null) =>
+        $"{{\"sub\":\"user_1\",\"iss\":\"{AuthioOptions.DefaultIssuer}\","
+        + $"\"aud\":\"{AuthioOptions.DefaultAudience}\",\"exp\":{exp}"
+        + (projectId is null ? "" : $",\"project_id\":\"{projectId}\"")
+        + "}}";
 
     private static long Exp(int deltaSeconds) => DateTimeOffset.UtcNow.ToUnixTimeSeconds() + deltaSeconds;
 
@@ -65,7 +77,9 @@ public class JwtVerifierTests
         var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
         var a = Client(h);
         var token = SignJwt(k.Priv, "key-1",
-            $"{{\"sub\":\"user_1\",\"sid\":\"sess_1\",\"act_org\":\"org_1\",\"act_role\":\"admin\",\"exp\":{Exp(3600)},\"plan\":\"pro\"}}");
+            $"{{\"sub\":\"user_1\",\"sid\":\"sess_1\",\"act_org\":\"org_1\",\"act_role\":\"admin\","
+            + $"\"iss\":\"{AuthioOptions.DefaultIssuer}\",\"aud\":\"{AuthioOptions.DefaultAudience}\","
+            + $"\"exp\":{Exp(3600)},\"plan\":\"pro\"}}");
 
         var session = await a.Sessions.VerifyAsync(token);
         Assert.NotNull(session);
@@ -83,7 +97,7 @@ public class JwtVerifierTests
         var k = NewKeys();
         var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
         var a = Client(h);
-        var token = SignJwt(k.Priv, "key-1", $"{{\"sub\":\"user_1\",\"exp\":{Exp(3600)}}}");
+        var token = SignJwt(k.Priv, "key-1", DefaultClaims(Exp(3600)));
         var tampered = token[..^4] + "AAAA";
         Assert.Null(await a.Sessions.VerifyAsync(tampered));
     }
@@ -94,7 +108,7 @@ public class JwtVerifierTests
         var k = NewKeys();
         var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
         var a = Client(h);
-        var token = SignJwt(k.Priv, "key-1", $"{{\"sub\":\"user_1\",\"exp\":{Exp(-3600)}}}");
+        var token = SignJwt(k.Priv, "key-1", DefaultClaims(Exp(-3600)));
         Assert.Null(await a.Sessions.VerifyAsync(token));
         var err = await Assert.ThrowsAsync<AuthioException>(() => a.Sessions.VerifyOrThrowAsync(token));
         Assert.Equal("invalid_token", err.Code);
@@ -112,5 +126,67 @@ public class JwtVerifierTests
         var ok = SignJwt(k.Priv, "key-1",
             $"{{\"sub\":\"u\",\"exp\":{Exp(3600)},\"iss\":\"https://api.authio.com\",\"aud\":\"authio\"}}");
         Assert.NotNull(await a.Sessions.VerifyAsync(ok));
+    }
+
+    // -----------------------------------------------------------------
+    // Security audit 2026-09-18. JwtIssuer/JwtAudience defaulted to null,
+    // and a null expected value means the check is skipped — so this SDK
+    // used to verify the signature and nothing else. Every tenant shares
+    // one signing key, so that accepted tokens from the whole platform.
+    // -----------------------------------------------------------------
+
+    [Fact]
+    public async Task EnforcesIssuerAndAudienceByDefault()
+    {
+        var k = NewKeys();
+        var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
+        var a = Client(h);
+        var token = SignJwt(k.Priv, "key-1", $"{{\"sub\":\"u\",\"exp\":{Exp(3600)}}}");
+        await Assert.ThrowsAsync<AuthioException>(() => a.Verifier.VerifyAsync(token));
+    }
+
+    [Fact]
+    public async Task RejectsTokenWithNoExpClaim()
+    {
+        var k = NewKeys();
+        var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
+        var a = Client(h);
+        var token = SignJwt(
+            k.Priv,
+            "key-1",
+            $"{{\"sub\":\"u\",\"iss\":\"{AuthioOptions.DefaultIssuer}\","
+            + $"\"aud\":\"{AuthioOptions.DefaultAudience}\"}}");
+        await Assert.ThrowsAsync<AuthioException>(() => a.Verifier.VerifyAsync(token));
+    }
+
+    [Fact]
+    public async Task RejectsTokenMintedInAnotherProject()
+    {
+        var k = NewKeys();
+        var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
+        var a = Client(h, projectId: "proj_victim");
+        var token = SignJwt(k.Priv, "key-1", DefaultClaims(Exp(3600), "proj_attacker"));
+        await Assert.ThrowsAsync<AuthioException>(() => a.Verifier.VerifyAsync(token));
+    }
+
+    [Fact]
+    public async Task RejectsTokenWithNoProjectIdWhenTenantConfigured()
+    {
+        var k = NewKeys();
+        var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
+        var a = Client(h, projectId: "proj_victim");
+        var token = SignJwt(k.Priv, "key-1", DefaultClaims(Exp(3600)));
+        await Assert.ThrowsAsync<AuthioException>(() => a.Verifier.VerifyAsync(token));
+    }
+
+    [Fact]
+    public async Task AcceptsTokenMintedForTheConfiguredProject()
+    {
+        var k = NewKeys();
+        var h = TestHandler.Sequence(new Canned(200, Jwks(k.Pub, "key-1")));
+        var a = Client(h, projectId: "proj_victim");
+        var token = SignJwt(k.Priv, "key-1", DefaultClaims(Exp(3600), "proj_victim"));
+        var claims = await a.Verifier.VerifyAsync(token);
+        Assert.Equal("user_1", claims.GetProperty("sub").GetString());
     }
 }
