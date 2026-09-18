@@ -66,7 +66,7 @@ public class JwtVerifierTests
         $"{{\"sub\":\"user_1\",\"iss\":\"{AuthioOptions.DefaultIssuer}\","
         + $"\"aud\":\"{AuthioOptions.DefaultAudience}\",\"exp\":{exp}"
         + (projectId is null ? "" : $",\"project_id\":\"{projectId}\"")
-        + "}}";
+        + "}";
 
     private static long Exp(int deltaSeconds) => DateTimeOffset.UtcNow.ToUnixTimeSeconds() + deltaSeconds;
 
