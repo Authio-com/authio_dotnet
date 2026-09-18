@@ -25,17 +25,25 @@ public sealed class JwtVerifier
     private readonly string _jwksUrl;
     private readonly string? _issuer;
     private readonly string? _audience;
+    private readonly string? _projectId;
+    private static int _warnedNoProject;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     private Dictionary<string, byte[]>? _keysByKid; // kid -> raw 32-byte Ed25519 public key
     private DateTimeOffset _fetchedAt = DateTimeOffset.MinValue;
 
-    public JwtVerifier(string jwksUrl, string? issuer, string? audience, HttpClient? http = null)
+    public JwtVerifier(
+        string jwksUrl,
+        string? issuer,
+        string? audience,
+        HttpClient? http = null,
+        string? projectId = null)
     {
         _jwksUrl = jwksUrl;
         _issuer = issuer;
         _audience = audience;
+        _projectId = projectId;
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
     }
 
@@ -87,11 +95,12 @@ public sealed class JwtVerifier
     private void ValidateClaims(JsonElement claims)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        if (claims.TryGetProperty("exp", out var exp) && exp.ValueKind == JsonValueKind.Number)
-        {
-            if (now > exp.GetInt64() + ClockSkewSeconds)
-                throw Invalid("token expired");
-        }
+        // exp is REQUIRED. It used to be checked only when present, so a
+        // token without it never expired.
+        if (!claims.TryGetProperty("exp", out var exp) || exp.ValueKind != JsonValueKind.Number)
+            throw Invalid("token has no exp claim");
+        if (now > exp.GetInt64() + ClockSkewSeconds)
+            throw Invalid("token expired");
         if (claims.TryGetProperty("nbf", out var nbf) && nbf.ValueKind == JsonValueKind.Number)
         {
             if (now < nbf.GetInt64() - ClockSkewSeconds)
@@ -109,6 +118,41 @@ public sealed class JwtVerifier
         var sub = claims.TryGetProperty("sub", out var s) ? s.GetString() : null;
         if (string.IsNullOrEmpty(sub))
             throw Invalid("missing sub claim");
+
+        AssertTenant(claims);
+    }
+
+    /// <summary>
+    /// Tenant binding (security audit 2026-09-18).
+    ///
+    /// Signature, issuer and audience prove a token came from Authio, not that
+    /// it was minted for THIS customer: auth-core signs every tenant with one
+    /// platform key under one fixed issuer/audience, so <c>project_id</c> is
+    /// the only claim that tells two tenants apart. Sign-up is self-serve, so
+    /// anyone can create <c>ceo@your-company.com</c> in their own project and
+    /// present the resulting token here.
+    ///
+    /// With no project configured this warns once and stays permissive, so
+    /// upgrading the package cannot sign anyone out on its own.
+    /// </summary>
+    private void AssertTenant(JsonElement claims)
+    {
+        if (string.IsNullOrEmpty(_projectId))
+        {
+            if (Interlocked.Exchange(ref _warnedNoProject, 1) == 0)
+            {
+                Console.Error.WriteLine(
+                    "authio: no ProjectId configured, so tokens are not checked against your "
+                    + "tenant. Any Authio-issued token will verify here, including one minted in "
+                    + "someone else's project. Set AUTHIO_PROJECT_ID or AuthioOptions.ProjectId.");
+            }
+
+            return;
+        }
+
+        var claimed = claims.TryGetProperty("project_id", out var p) ? p.GetString() : null;
+        if (!string.Equals(claimed, _projectId, StringComparison.Ordinal))
+            throw Invalid($"token was issued for project {claimed ?? "<none>"}, not {_projectId}");
     }
 
     private static bool AudienceContains(JsonElement claims, string audience)
