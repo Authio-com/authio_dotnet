@@ -9,7 +9,7 @@
     <AssemblyName>Authio.Sdk</AssemblyName>
 
     <PackageId>Authio.Sdk</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Authio</Authors>
     <Company>Authio</Company>
     <Description>Official .NET server SDK for Authio.</Description>
