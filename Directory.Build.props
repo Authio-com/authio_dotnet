@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <!-- Commit a packages.lock.json per project so restores are reproducible
+         (and dependency scanners see pinned transitive versions). CI restores
+         in locked mode, so a stale lock file fails the build; refresh it with
+         "dotnet restore" with the force-evaluate flag after changing a PackageReference. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+</Project>
